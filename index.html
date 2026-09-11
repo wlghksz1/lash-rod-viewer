@@ -128,7 +128,7 @@
         </select>
       </div>
       <canvas id="sec2d"></canvas>
-      <p class="hint" id="secNote" style="display:none">폭·높이는 롯드 본체만 잰 값입니다. 날개(연한 선)는 제외됩니다.</p>
+      <p class="hint" id="secNote" style="display:none">폭·높이는 롯드 본체만 잰 값입니다. 날개(연한 선)는 제외됩니다. 날개가 붙는 쪽은 윗곡선과 아랫선을 연장한 가상 모서리(점선)까지 잽니다.</p>
     </section>
     <section>
       <h3>조작</h3>
@@ -525,7 +525,59 @@ function measureBody(sec) {
     }
     return best;
   };
-  const w0 = snap(L, -1), w1 = snap(R, +1);
+  let w0 = snap(L, -1), w1 = snap(R, +1);
+  // 날개가 붙는 쪽: 윗곡선(원호)과 아랫선(직선)을 연장해 만나는 가상 모서리까지 폭을 잰다
+  const ext = []; // 점선으로 그릴 연장선
+  const virtualCorner = (edge, dir) => {
+    // dir = -1: 왼쪽 끝(w0)에서 바깥은 -u 방향
+    const span = Math.min(2.5, (w1 - w0) * 0.35); if (span < 0.4) return null;
+    const kS = Math.round((edge - U0) / STEP), kE = Math.round((edge + (dir < 0 ? span : -span) - U0) / STEP);
+    const top = [], bot = [];
+    for (let k = Math.min(kS, kE); k <= Math.max(kS, kE); k++) { if (k < 0 || k >= nb || hi[k] <= lo[k]) continue; const x = U0 + k * STEP; top.push([x, hi[k]]); bot.push([x, lo[k]]); }
+    if (top.length < 8) return null;
+    // 아랫선: 최소제곱 직선 v = m u + c
+    const fitLine = P => { let sx = 0, sy = 0, sxx = 0, sxy = 0; for (const [x, y] of P) { sx += x; sy += y; sxx += x * x; sxy += x * y; } const n = P.length; const d = n * sxx - sx * sx; if (Math.abs(d) < 1e-12) return null; const m = (n * sxy - sx * sy) / d; return { m, c: (sy - m * sx) / n }; };
+    // 아랫선은 끝쪽 절반만 써서 국부 기울기 반영
+    const botNear = bot.filter(([x]) => Math.abs(x - edge) <= span * 0.5);
+    const line = fitLine(botNear.length >= 4 ? botNear : bot); if (!line) return null;
+    // 윗곡선: 대수적 원 맞춤 (x²+y²+Dx+Ey+F=0)
+    const fitCircle = P => {
+      let a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = P.length, b1 = 0, b2 = 0, b3 = 0;
+      for (const [x, y] of P) { const z = -(x * x + y * y); a11 += x * x; a12 += x * y; a13 += x; a22 += y * y; a23 += y; b1 += x * z; b2 += y * z; b3 += z; }
+      const det = a11 * (a22 * a33 - a23 * a23) - a12 * (a12 * a33 - a23 * a13) + a13 * (a12 * a23 - a22 * a13); if (Math.abs(det) < 1e-9) return null;
+      const D = (b1 * (a22 * a33 - a23 * a23) - a12 * (b2 * a33 - a23 * b3) + a13 * (b2 * a23 - a22 * b3)) / det;
+      const E = (a11 * (b2 * a33 - a23 * b3) - b1 * (a12 * a33 - a23 * a13) + a13 * (a12 * b3 - b2 * a13)) / det;
+      const F = (a11 * (a22 * b3 - b2 * a23) - a12 * (a12 * b3 - b2 * a13) + b1 * (a12 * a23 - a22 * a13)) / det;
+      const cx = -D / 2, cy = -E / 2, r2 = cx * cx + cy * cy - F; if (r2 <= 0) return null; return { cx, cy, r: Math.sqrt(r2) };
+    };
+    const circ = fitCircle(top);
+    let corner = null;
+    if (circ && circ.r < 60) {
+      // 원 ∩ 직선
+      const { m, c } = line, { cx, cy, r } = circ;
+      const A = 1 + m * m, B = 2 * (m * (c - cy) - cx), C = cx * cx + (c - cy) * (c - cy) - r * r; const disc = B * B - 4 * A * C;
+      if (disc >= 0) { const roots = [(-B - Math.sqrt(disc)) / (2 * A), (-B + Math.sqrt(disc)) / (2 * A)].filter(x => dir < 0 ? x <= edge + 0.02 : x >= edge - 0.02); if (roots.length) { const x = dir < 0 ? Math.max(...roots) : Math.min(...roots); corner = [x, m * x + c]; } }
+    }
+    if (!corner) { // 원이 안 맞으면 윗곡선 끝 접선(직선)으로
+      const topNear = top.filter(([x]) => Math.abs(x - edge) <= 0.6); const tl = fitLine(topNear.length >= 4 ? topNear : top); if (!tl || Math.abs(tl.m - line.m) < 1e-6) return null;
+      const x = (line.c - tl.c) / (tl.m - line.m); corner = [x, line.m * x + line.c];
+      if (dir < 0 ? x > edge + 0.02 : x < edge - 0.02) return null;
+    }
+    if (Math.abs(corner[0] - edge) > 3) return null; // 너무 멀면 비정상 → 사용 안 함
+    // 연장선 (점선용): 윗곡선 끝 → 모서리 (원호 또는 직선), 아랫선 끝 → 모서리
+    const topEnd = top.reduce((a, b) => (dir < 0 ? (b[0] < a[0] ? b : a) : (b[0] > a[0] ? b : a)));
+    const botEnd = bot.reduce((a, b) => (dir < 0 ? (b[0] < a[0] ? b : a) : (b[0] > a[0] ? b : a)));
+    if (circ && circ.r < 60 && corner) {
+      const a0 = Math.atan2(topEnd[1] - circ.cy, topEnd[0] - circ.cx), a1 = Math.atan2(corner[1] - circ.cy, corner[0] - circ.cx);
+      let da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+      let prev = topEnd; for (let i = 1; i <= 12; i++) { const a = a0 + da * i / 12; const q = [circ.cx + circ.r * Math.cos(a), circ.cy + circ.r * Math.sin(a)]; ext.push([prev, q]); prev = q; }
+    } else ext.push([topEnd, corner]);
+    ext.push([botEnd, corner]);
+    return corner;
+  };
+  let virt = false;
+  if (!L.reachedEnd) { const c = virtualCorner(w0, -1); if (c) { w0 = c[0]; virt = true; } }
+  if (!R.reachedEnd) { const c = virtualCorner(w1, +1); if (c) { w1 = c[0]; virt = true; } }
   let h0 = Infinity, h1 = -Infinity; const segsB = [], segsW = [];
   const inR = x => x >= w0 - 0.005 && x <= w1 + 0.005;
   for (const P of polys) for (let i = 0; i + 1 < P.pts.length; i++) {
@@ -533,7 +585,8 @@ function measureBody(sec) {
     if (inR(p[0]) && inR(q[0])) { segsB.push([p, q]); for (const r of [p, q]) { h0 = Math.min(h0, r[1]); h1 = Math.max(h1, r[1]); } }
     else segsW.push([p, q]);
   }
-  sec.body = { w: w1 - w0, h: h1 - h0, w0, w1, h0, h1, segs: segsB, maxThickness: maxT };
+  for (const [p, q] of ext) for (const r of [p, q]) { h0 = Math.min(h0, r[1]); h1 = Math.max(h1, r[1]); }
+  sec.body = { w: w1 - w0, h: h1 - h0, w0, w1, h0, h1, segs: segsB, ext, virtual: virt, maxThickness: maxT };
   sec.wing = { segs: segsW };
 }
 
@@ -558,7 +611,7 @@ function drawSection(sec) {
     const lg = new THREE.BufferGeometry().setFromPoints(pts);
     const ln = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: width })); ln.renderOrder = 8; secGroup.add(ln);
   };
-  addSegs(sec.body.segs, 0xe8590c, 1.0); addSegs(sec.wing.segs, 0xe8590c, 0.35);
+  addSegs(sec.body.segs, 0xe8590c, 1.0); addSegs(sec.wing.segs, 0xe8590c, 0.35); if (sec.body.ext) addSegs(sec.body.ext, 0xe8590c, 0.6);
   // 클릭 지점 + 법선 표시
   const dot = new THREE.Mesh(new THREE.SphereGeometry(labelScale * 0.15, 12, 12), new THREE.MeshBasicMaterial({ color: 0xe8590c, depthTest: false })); dot.position.copy(sec.point); dot.renderOrder = 9; secGroup.add(dot);
   secGroup.add(new THREE.ArrowHelper(sec.n, sec.point, labelScale * 1.5, 0xe8590c, labelScale * 0.4, labelScale * 0.25));
@@ -593,6 +646,7 @@ function render2D(cv, sec, scale) {
   const X = x => cx + (x - xm) * sc, Y = y => cy - (y - ym) * sc;
   const draw = (segs, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); for (const [p, q] of segs) { ctx.moveTo(X(p[0]), Y(p[1])); ctx.lineTo(X(q[0]), Y(q[1])); } ctx.stroke(); };
   draw(sec.wing.segs, '#c9ccd3', lw * 0.6); draw(b.segs, '#e8590c', lw);
+  if (b.ext && b.ext.length) { ctx.setLineDash([lw * 3, lw * 2]); draw(b.ext, '#e8590c', lw * 0.7); ctx.setLineDash([]); }
   ctx.strokeStyle = '#2f6fed'; ctx.fillStyle = '#2f6fed'; ctx.lineWidth = big ? 1.5 : 1; ctx.font = `${fs}px "Malgun Gothic", sans-serif`;
   const yb = Y(b.h0) + fs * 1.3; ctx.beginPath(); ctx.moveTo(X(b.w0), yb); ctx.lineTo(X(b.w1), yb); ctx.moveTo(X(b.w0), yb - fs * 0.5); ctx.lineTo(X(b.w0), yb + fs * 0.5); ctx.moveTo(X(b.w1), yb - fs * 0.5); ctx.lineTo(X(b.w1), yb + fs * 0.5); ctx.stroke();
   ctx.textAlign = 'center'; ctx.fillText(`폭 ${fmt(b.w)} mm`, (X(b.w0) + X(b.w1)) / 2, yb + fs * 1.1);
