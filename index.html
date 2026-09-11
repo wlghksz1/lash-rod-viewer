@@ -591,16 +591,6 @@ function render2D(cv, sec, scale) {
   else sc = parseFloat(mode) * (W / 1600);
   const cx = W / 2, cy = H / 2, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
   const X = x => cx + (x - xm) * sc, Y = y => cy - (y - ym) * sc;
-  // 1 mm 격자 (본체 왼쪽 아래 모서리에 맞춤)
-  ctx.strokeStyle = '#eef0f3'; ctx.lineWidth = 1; ctx.beginPath();
-  for (let gx = b.w0 - Math.ceil((X(b.w0)) / sc); X(gx) < W; gx += 1) { const px = Math.round(X(gx)) + 0.5; ctx.moveTo(px, 0); ctx.lineTo(px, H); }
-  for (let gy = b.h0 - Math.ceil((H - Y(b.h0)) / sc); Y(gy) > 0; gy += 1) { const py = Math.round(Y(gy)) + 0.5; ctx.moveTo(0, py); ctx.lineTo(W, py); }
-  ctx.stroke();
-  // 5 mm 격자는 조금 진하게
-  ctx.strokeStyle = '#dfe3e8'; ctx.beginPath();
-  for (let gx = b.w0 - 5 * Math.ceil((X(b.w0)) / sc / 5); X(gx) < W; gx += 5) { const px = Math.round(X(gx)) + 0.5; ctx.moveTo(px, 0); ctx.lineTo(px, H); }
-  for (let gy = b.h0 - 5 * Math.ceil((H - Y(b.h0)) / sc / 5); Y(gy) > 0; gy += 5) { const py = Math.round(Y(gy)) + 0.5; ctx.moveTo(0, py); ctx.lineTo(W, py); }
-  ctx.stroke();
   const draw = (segs, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); for (const [p, q] of segs) { ctx.moveTo(X(p[0]), Y(p[1])); ctx.lineTo(X(q[0]), Y(q[1])); } ctx.stroke(); };
   draw(sec.wing.segs, '#c9ccd3', lw * 0.6); draw(b.segs, '#e8590c', lw);
   ctx.strokeStyle = '#2f6fed'; ctx.fillStyle = '#2f6fed'; ctx.lineWidth = big ? 1.5 : 1; ctx.font = `${fs}px "Malgun Gothic", sans-serif`;
@@ -612,7 +602,7 @@ function render2D(cv, sec, scale) {
     ctx.fillStyle = '#1f2933'; ctx.textAlign = 'left'; ctx.font = `bold ${fs}px "Malgun Gothic", sans-serif`;
     ctx.fillText(`${$('fileName').textContent} · 단면 (바닥면 기준)`, pad * 0.4, fs * 1.6);
     ctx.font = `${fs * 0.8}px "Malgun Gothic", sans-serif`; ctx.fillStyle = '#6b7480';
-    ctx.fillText(`위치 X ${fmt(sec.point.x)}, Y ${fmt(sec.point.y)}, Z ${fmt(sec.point.z)} · 바닥면 기울기 ${THREE.MathUtils.radToDeg(Math.acos(-sec.n.z)).toFixed(1)}° · 본체 폭 ${fmt(b.w)} × 높이 ${fmt(b.h)} mm (0.05 mm 단위) · 연한 선 = 날개(치수 제외) · 격자 1 mm (진한 선 5 mm) · 배율 1 mm = ${sc.toFixed(1)} px`, pad * 0.4, fs * 2.8);
+    ctx.fillText(`위치 X ${fmt(sec.point.x)}, Y ${fmt(sec.point.y)}, Z ${fmt(sec.point.z)} · 바닥면 기울기 ${THREE.MathUtils.radToDeg(Math.acos(-sec.n.z)).toFixed(1)}° · 본체 폭 ${fmt(b.w)} × 높이 ${fmt(b.h)} mm (0.05 mm 단위) · 연한 선 = 날개(치수 제외) · 배율 1 mm = ${sc.toFixed(1)} px`, pad * 0.4, fs * 2.8);
   }
 }
 
