@@ -61,6 +61,9 @@
     <button id="btnOpen" class="primary">파일 열기 (STEP)</button>
     <input id="fileInput" type="file" accept=".stp,.step,.STP,.STEP" hidden>
     <span class="file" id="fileName">파일을 열거나 화면에 끌어다 놓으세요</span>
+    <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);white-space:nowrap">표시 단위
+      <select id="unitSel" style="font:inherit;font-size:13px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:#fff"><option value="0.1">0.1 mm</option><option value="0.05" selected>0.05 mm</option><option value="0.01">0.01 mm</option></select>
+    </label>
     <button data-view="front">정면</button>
     <button data-view="top">윗면</button>
     <button data-view="right">우측면</button>
@@ -139,7 +142,7 @@
   <footer>
     <span id="stTri">삼각형 –</span>
     <span id="stFace">면 –</span>
-    <span>표시 단위 <select id="unitSel" style="font:inherit;font-size:12px;border:1px solid var(--line);border-radius:4px;padding:1px 4px"><option value="0.1">0.1 mm</option><option value="0.05" selected>0.05 mm</option><option value="0.01">0.01 mm</option></select></span>
+    <span id="stUnit">표시 단위 0.05 mm</span>
     <span>단위 mm</span>
     <span id="stTime"></span>
   </footer>
@@ -685,7 +688,7 @@ $('lbNew').addEventListener('click', () => {
   w.document.close();
 });
 $('unitSel').addEventListener('change', e => {
-  UNIT = parseFloat(e.target.value);
+  UNIT = parseFloat(e.target.value); setText('stUnit', `표시 단위 ${UNIT} mm`);
   if (modelBox) { const s = new THREE.Vector3(); modelBox.getSize(s); setDim('dimX', s.x); setDim('dimY', s.y); setDim('dimZ', s.z); buildDims(modelBox); }
   if (section && !$('secDimBox').hidden) $('btnSecDims').click();
 });
