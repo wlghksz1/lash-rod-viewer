@@ -46,10 +46,15 @@
   .spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto 10px; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   #err { position: absolute; left: 12px; bottom: 12px; background: #fff3f0; color: #b42318; border: 1px solid #f5b8ab; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: none; max-width: 70%; }
+  #lightbox { position: fixed; inset: 0; background: rgba(20,24,30,.85); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px; z-index: 50; }
+  #lightbox img { max-width: 96vw; max-height: 86vh; background: #fff; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+  #lightbox .bar { display: flex; gap: 8px; }
+  #lightbox .bar button { background: #fff; }
   #tip { position: absolute; left: 12px; top: 12px; background: rgba(255,255,255,.92); border: 1px solid var(--line); padding: 6px 10px; border-radius: 8px; font-size: 13px; display: none; }
 </style>
 </head>
 <body>
+<div id="lightbox"><img id="lightboxImg" alt="단면 확대"><div class="bar"><button id="lbNew">새 창으로 열기</button><button id="lbClose">닫기 (ESC)</button></div></div>
 <div id="app">
   <header>
     <span class="title">롯드 3D 뷰어</span>
@@ -585,14 +590,23 @@ function render2D(cv, sec, scale) {
   }
 }
 
-// 작은 그림 클릭 → 새 창에 크게 (캡처용)
+// 작은 그림 클릭 → 화면 전체에 크게 (캡처용). 팝업 차단과 무관하게 동작
+let lastBigUrl = '';
 $('sec2d').addEventListener('click', () => {
   if (!section) return;
   const cv = document.createElement('canvas'); cv.width = 1600; cv.height = 1000;
   render2D(cv, section, 1);
+  lastBigUrl = cv.toDataURL('image/png');
+  $('lightboxImg').src = lastBigUrl; $('lightbox').style.display = 'flex';
+});
+const closeLb = () => { $('lightbox').style.display = 'none'; };
+$('lbClose').addEventListener('click', closeLb);
+$('lightbox').addEventListener('click', e => { if (e.target === $('lightbox')) closeLb(); });
+window.addEventListener('keydown', e => { if (e.key === 'Escape' && $('lightbox').style.display === 'flex') closeLb(); });
+$('lbNew').addEventListener('click', () => {
   const w = window.open('', '_blank');
-  if (!w) { showErr('팝업이 차단됐습니다. 주소창의 팝업 허용을 눌러주세요.'); return; }
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>단면 - ${$('fileName').textContent}</title><style>body{margin:0;background:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="${cv.toDataURL('image/png')}" alt="단면"></body></html>`);
+  if (!w) { showErr('팝업이 차단됐습니다. 주소창 오른쪽의 팝업 허용을 눌러주세요. (확대 보기 화면을 바로 캡처하셔도 됩니다)'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>단면 - ${$('fileName').textContent}</title><style>body{margin:0;background:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="${lastBigUrl}" alt="단면"></body></html>`);
   w.document.close();
 });
 $('sec2d').style.cursor = 'zoom-in'; $('sec2d').title = '클릭하면 새 창에 크게 열립니다';
