@@ -58,7 +58,8 @@
     <span class="file" id="fileName">파일을 열거나 화면에 끌어다 놓으세요</span>
     <button data-view="front">정면</button>
     <button data-view="top">윗면</button>
-    <button data-view="side">옆면</button>
+    <button data-view="right">우측면</button>
+    <button data-view="left">좌측면</button>
     <button data-view="bottom">바닥면</button>
     <button data-view="iso">등각</button>
     <button id="btnFit">맞춤</button>
@@ -91,6 +92,16 @@
       <div id="sliderWrap" style="display:none">
         <div class="hint">단면 위치 (길이 방향으로 이동)</div>
         <input type="range" id="secSlider" min="0" max="1000" value="500">
+        <div class="row" id="presetRow" style="margin-top:4px">
+          <button data-pos="0.02" title="좌측 끝">좌3</button>
+          <button data-pos="0.1667">좌2</button>
+          <button data-pos="0.3333">좌1</button>
+          <button data-pos="0.5" class="primary">중앙</button>
+          <button data-pos="0.6667">우1</button>
+          <button data-pos="0.8333">우2</button>
+          <button data-pos="0.98" title="우측 끝">우3</button>
+        </div>
+        <p class="hint" style="margin-top:2px">중앙과 양쪽을 3등분한 위치. 좌 = X 작은 쪽</p>
       </div>
       <div class="row">
         <button id="btnSecDims" disabled>치수 확인</button>
@@ -105,14 +116,14 @@
     </section>
     <section>
       <h3>조작</h3>
-      <p class="hint">왼쪽 드래그: 회전 · 휠: 확대/축소 · 오른쪽 드래그: 이동</p>
+      <p class="hint">왼쪽 드래그: 회전 · 휠 굴리기: 확대/축소 · 휠 누른 채 드래그: 이동</p>
     </section>
   </aside>
 
   <footer>
     <span id="stTri">삼각형 –</span>
     <span id="stFace">면 –</span>
-    <span>정밀도 0.01 mm</span>
+    <span>표시 단위 0.05 mm</span>
     <span>단위 mm</span>
     <span id="stTime"></span>
   </footer>
@@ -139,8 +150,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 5000);
 camera.up.set(0, 0, 1);              // CAD 관례: Z가 위
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; controls.dampingFactor = 0.12;
-controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+controls.enableDamping = false; controls.rotateSpeed = 0.7; controls.zoomSpeed = 0.9;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 };
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x99a3b3, 2.2));
 const camLight = new THREE.DirectionalLight(0xffffff, 2.6); camera.add(camLight); camLight.position.set(0.6, 0.8, 1); scene.add(camera);
@@ -166,7 +177,7 @@ new ResizeObserver(resize).observe(viewport); resize();
 })();
 
 // ---------- 유틸 ----------
-const fmt = v => v.toFixed(2);
+const fmt = v => (Math.round(v / 0.05) * 0.05).toFixed(2);   // 0.05 mm 단위로 반올림
 function setText(id, t) { $(id).textContent = t; }
 function setDim(id, v) { const el = $(id); el.textContent = fmt(v); const sm = document.createElement('small'); sm.textContent = 'mm'; el.appendChild(sm); }
 function showErr(msg) { const e = $('err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
@@ -230,14 +241,13 @@ function fitView(dir) {
   const dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15;
   const d = (dir || camera.position.clone().sub(controls.target)).clone().normalize();
   camera.position.copy(c).add(d.multiplyScalar(dist));
-  camera.up.set(0, 0, 1);
-  if (dir && Math.abs(d.z) > 0.99) camera.up.set(0, 1, 0); // 위·아래에서 볼 때: 화면 위쪽 = +Y (날개가 위로)
+  camera.up.set(0, 0, 1); // 위 방향은 항상 Z 고정 (시점마다 바꾸면 회전할 때 뒤집힘)
   camera.near = dist / 100; camera.far = dist * 100; camera.updateProjectionMatrix();
   controls.target.copy(c); controls.update();
 }
 const VIEWS = {
-  front: new THREE.Vector3(0, -1, 0), top: new THREE.Vector3(0, 0, 1), side: new THREE.Vector3(1, 0, 0),
-  bottom: new THREE.Vector3(0, 0, -1), iso: new THREE.Vector3(1, -1, 0.8),
+  front: new THREE.Vector3(0, -1, 0), top: new THREE.Vector3(0, -0.02, 1), right: new THREE.Vector3(1, 0, 0), left: new THREE.Vector3(-1, 0, 0),
+  bottom: new THREE.Vector3(0, -0.02, -1), iso: new THREE.Vector3(1, -1, 0.8),
 };
 document.querySelectorAll('button[data-view]').forEach(b => b.addEventListener('click', () => fitView(VIEWS[b.dataset.view])));
 $('btnFit').addEventListener('click', () => fitView());
@@ -312,7 +322,7 @@ function showModel(res, name, ms) {
   widthAxis = lengthAxis.x ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);   // 폭 방향 = 길이·높이(Z)에 수직
   analyzeFaces(g, faces);
   fitView(VIEWS.iso);
-  $('btnPick').disabled = false;
+  $('btnPick').disabled = false; $('sliderWrap').style.display = 'block';
   setText('secHint', `바닥면(아래를 향한 면)이 ${bottomFaces.size}개 감지됐습니다. 버튼을 누른 뒤 바닥면 위를 클릭하세요.`);
 }
 
@@ -403,6 +413,10 @@ function makeSectionAt(point, nRaw) {
   window.__section = { point: point.toArray(), n: n.toArray(), t: t.toArray(), u: u.toArray(), body: section.body, full: section.full };
 }
 
+// 프리셋 버튼 → 슬라이더 값 설정 후 단면 생성
+document.querySelectorAll('#presetRow button').forEach(b => b.addEventListener('click', () => {
+  const s = $('secSlider'); s.value = Math.round(parseFloat(b.dataset.pos) * 1000); s.dispatchEvent(new Event('input'));
+}));
 // 슬라이더: 길이 방향 위치 → 그 위치의 바닥면 삼각형(가운데 쪽)에서 단면 생성
 $('secSlider').addEventListener('input', e => {
   if (!bottomTris.length) return;
@@ -543,19 +557,45 @@ function drawSectionDims(sec) {
   g.add(dimensionLine(to3(b.w0, b.h0), to3(b.w1, b.h0), sec.v.clone().multiplyScalar(-off), `폭 ${fmt(b.w)} mm`, 0xe8590c));
   g.add(dimensionLine(to3(b.w1, b.h0), to3(b.w1, b.h1), sec.u.clone().multiplyScalar(off), `높이 ${fmt(b.h)} mm`, 0xe8590c));
   secGroup.add(g);
-  // 2D 단면 그림
-  const cv = $('sec2d'); cv.style.display = 'block'; const W = cv.clientWidth, H = cv.clientHeight; cv.width = W * 2; cv.height = H * 2;
-  const ctx = cv.getContext('2d'); ctx.scale(2, 2); ctx.clearRect(0, 0, W, H);
+  render2D($('sec2d'), sec, 2);
+}
+
+// 2D 단면 그림 (캔버스 크기에 맞춰 그림). scale = 해상도 배율
+function render2D(cv, sec, scale) {
+  const b = sec.body; cv.style.display = 'block';
+  const W = cv.clientWidth || cv.width / scale, H = cv.clientHeight || cv.height / scale; cv.width = W * scale; cv.height = H * scale;
+  const ctx = cv.getContext('2d'); ctx.scale(scale, scale); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [p, q] of [...b.segs, ...sec.wing.segs]) for (const r of [p, q]) { x0 = Math.min(x0, r[0]); x1 = Math.max(x1, r[0]); y0 = Math.min(y0, r[1]); y1 = Math.max(y1, r[1]); }
-  const pad = 26; const sc = Math.min((W - pad * 2) / (x1 - x0), (H - pad * 2) / (y1 - y0));
+  const big = W > 700; const pad = big ? 90 : 26, fs = big ? 22 : 11, lw = big ? 3 : 1.8;
+  const sc = Math.min((W - pad * 2) / (x1 - x0), (H - pad * 2) / (y1 - y0));
   const X = x => pad + (x - x0) * sc + ((W - pad * 2) - (x1 - x0) * sc) / 2, Y = y => H - pad - (y - y0) * sc - ((H - pad * 2) - (y1 - y0) * sc) / 2;
-  const draw = (segs, color, lw) => { ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath(); for (const [p, q] of segs) { ctx.moveTo(X(p[0]), Y(p[1])); ctx.lineTo(X(q[0]), Y(q[1])); } ctx.stroke(); };
-  draw(sec.wing.segs, '#c9ccd3', 1); draw(b.segs, '#e8590c', 1.8);
-  ctx.strokeStyle = '#2f6fed'; ctx.fillStyle = '#2f6fed'; ctx.lineWidth = 1; ctx.font = '11px "Malgun Gothic", sans-serif';
-  const yb = Y(b.h0) + 14; ctx.beginPath(); ctx.moveTo(X(b.w0), yb); ctx.lineTo(X(b.w1), yb); ctx.stroke(); ctx.textAlign = 'center'; ctx.fillText(`${fmt(b.w)} mm`, (X(b.w0) + X(b.w1)) / 2, yb + 12);
-  const xr = X(b.w1) + 10; ctx.beginPath(); ctx.moveTo(xr, Y(b.h0)); ctx.lineTo(xr, Y(b.h1)); ctx.stroke(); ctx.save(); ctx.translate(xr + 10, (Y(b.h0) + Y(b.h1)) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(`${fmt(b.h)} mm`, 0, 0); ctx.restore();
+  const draw = (segs, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); for (const [p, q] of segs) { ctx.moveTo(X(p[0]), Y(p[1])); ctx.lineTo(X(q[0]), Y(q[1])); } ctx.stroke(); };
+  draw(sec.wing.segs, '#c9ccd3', lw * 0.6); draw(b.segs, '#e8590c', lw);
+  ctx.strokeStyle = '#2f6fed'; ctx.fillStyle = '#2f6fed'; ctx.lineWidth = big ? 1.5 : 1; ctx.font = `${fs}px "Malgun Gothic", sans-serif`;
+  const yb = Y(b.h0) + fs * 1.3; ctx.beginPath(); ctx.moveTo(X(b.w0), yb); ctx.lineTo(X(b.w1), yb); ctx.moveTo(X(b.w0), yb - fs * 0.5); ctx.lineTo(X(b.w0), yb + fs * 0.5); ctx.moveTo(X(b.w1), yb - fs * 0.5); ctx.lineTo(X(b.w1), yb + fs * 0.5); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.fillText(`폭 ${fmt(b.w)} mm`, (X(b.w0) + X(b.w1)) / 2, yb + fs * 1.1);
+  const xr = X(b.w1) + fs; ctx.beginPath(); ctx.moveTo(xr, Y(b.h0)); ctx.lineTo(xr, Y(b.h1)); ctx.moveTo(xr - fs * 0.5, Y(b.h0)); ctx.lineTo(xr + fs * 0.5, Y(b.h0)); ctx.moveTo(xr - fs * 0.5, Y(b.h1)); ctx.lineTo(xr + fs * 0.5, Y(b.h1)); ctx.stroke();
+  ctx.save(); ctx.translate(xr + fs * 1.1, (Y(b.h0) + Y(b.h1)) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(`높이 ${fmt(b.h)} mm`, 0, 0); ctx.restore();
+  if (big) {
+    ctx.fillStyle = '#1f2933'; ctx.textAlign = 'left'; ctx.font = `bold ${fs}px "Malgun Gothic", sans-serif`;
+    ctx.fillText(`${$('fileName').textContent} · 단면 (바닥면 기준)`, pad * 0.4, fs * 1.6);
+    ctx.font = `${fs * 0.8}px "Malgun Gothic", sans-serif`; ctx.fillStyle = '#6b7480';
+    ctx.fillText(`위치 X ${fmt(sec.point.x)}, Y ${fmt(sec.point.y)}, Z ${fmt(sec.point.z)} · 바닥면 기울기 ${THREE.MathUtils.radToDeg(Math.acos(-sec.n.z)).toFixed(1)}° · 본체 폭 ${fmt(b.w)} × 높이 ${fmt(b.h)} mm (0.05 mm 단위) · 연한 선 = 날개(치수 제외)`, pad * 0.4, fs * 2.8);
+  }
 }
+
+// 작은 그림 클릭 → 새 창에 크게 (캡처용)
+$('sec2d').addEventListener('click', () => {
+  if (!section) return;
+  const cv = document.createElement('canvas'); cv.width = 1600; cv.height = 1000;
+  render2D(cv, section, 1);
+  const w = window.open('', '_blank');
+  if (!w) { showErr('팝업이 차단됐습니다. 주소창의 팝업 허용을 눌러주세요.'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>단면 - ${$('fileName').textContent}</title><style>body{margin:0;background:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="${cv.toDataURL('image/png')}" alt="단면"></body></html>`);
+  w.document.close();
+});
+$('sec2d').style.cursor = 'zoom-in'; $('sec2d').title = '클릭하면 새 창에 크게 열립니다';
 
 $('btnSecDims').addEventListener('click', () => {
   if (!section) return;
@@ -567,7 +607,7 @@ $('btnSecClear').addEventListener('click', clearSection);
 function clearSection() {
   section = null; secGroup.clear();
   if (modelMat) { modelMat.clippingPlanes = null; modelMat.needsUpdate = true; }
-  $('btnSecDims').disabled = true; $('btnSecClear').disabled = true; $('secDimBox').hidden = true; $('sec2d').style.display = 'none'; $('secNote').style.display = 'none'; $('sliderWrap').style.display = 'none';
+  $('btnSecDims').disabled = true; $('btnSecClear').disabled = true; $('secDimBox').hidden = true; $('sec2d').style.display = 'none'; $('secNote').style.display = 'none';
   setText('secW', '–'); setText('secH', '–');
   if (modelMesh) setText('secHint', '버튼을 누른 뒤 바닥면 위를 클릭하세요.');
 }
