@@ -1,0 +1,5 @@
+*.stp
+*.step
+*.stl
+.DS_Store
+Thumbs.db

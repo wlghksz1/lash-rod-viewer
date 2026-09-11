@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>롯드 3D 뷰어</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --line: #d9dde3; --text: #1f2933; --muted: #6b7480;
+    --accent: #2f6fed; --accent2: #e8590c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: "Malgun Gothic", "Segoe UI", system-ui, sans-serif; color: var(--text); background: var(--bg); }
+  #app { display: grid; grid-template-rows: 48px 1fr 28px; grid-template-columns: 1fr 320px; height: 100%; }
+  header { grid-column: 1 / 3; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header .title { font-weight: 700; margin-right: 8px; white-space: nowrap; }
+  header .file { color: var(--muted); font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { background: #245cc9; }
+  button.active { background: #eaf0fe; border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  #viewport { position: relative; background: linear-gradient(#f7f8fa, #e6e9ee); overflow: hidden; }
+  #viewport canvas { display: block; }
+  #viewport.pick { cursor: crosshair; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); padding: 12px; overflow: auto; font-size: 14px; }
+  aside h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); letter-spacing: .04em; }
+  aside section { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .dim { display: grid; grid-template-columns: 64px 1fr; row-gap: 6px; align-items: baseline; }
+  .dim .k { color: var(--muted); }
+  .dim .v { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; }
+  .dim .v small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .hint { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 6px 0; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  label.chk { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 6px; }
+  input[type=range] { width: 100%; }
+  #sec2d { width: 100%; height: 200px; border: 1px solid var(--line); border-radius: 6px; background: #fff; display: none; margin-top: 8px; }
+  footer { grid-column: 1 / 3; display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 12px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--line); }
+  #drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; color: var(--muted); pointer-events: none; }
+  #drop .box { border: 2px dashed #b5bcc6; border-radius: 12px; padding: 32px 40px; text-align: center; background: rgba(255,255,255,.7); }
+  #drop .box b { display: block; font-size: 18px; color: var(--text); margin-bottom: 6px; }
+  #viewport.dragover #drop .box { border-color: var(--accent); background: rgba(47,111,237,.08); }
+  #overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(255,255,255,.75); z-index: 5; }
+  #overlay .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 20px 28px; text-align: center; box-shadow: 0 6px 24px rgba(0,0,0,.08); }
+  .spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto 10px; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #err { position: absolute; left: 12px; bottom: 12px; background: #fff3f0; color: #b42318; border: 1px solid #f5b8ab; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: none; max-width: 70%; }
+  #tip { position: absolute; left: 12px; top: 12px; background: rgba(255,255,255,.92); border: 1px solid var(--line); padding: 6px 10px; border-radius: 8px; font-size: 13px; display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="title">롯드 3D 뷰어</span>
+    <button id="btnOpen" class="primary">파일 열기 (STEP)</button>
+    <input id="fileInput" type="file" accept=".stp,.step,.STP,.STEP" hidden>
+    <span class="file" id="fileName">파일을 열거나 화면에 끌어다 놓으세요</span>
+    <button data-view="front">정면</button>
+    <button data-view="top">윗면</button>
+    <button data-view="side">옆면</button>
+    <button data-view="bottom">바닥면</button>
+    <button data-view="iso">등각</button>
+    <button id="btnFit">맞춤</button>
+  </header>
+
+  <div id="viewport">
+    <div id="drop"><div class="box"><b>STEP 파일을 여기에 놓으세요</b>.stp / .step · 파일은 이 PC 안에서만 처리됩니다</div></div>
+    <div id="overlay"><div class="card"><div class="spinner"></div><div id="overlayText">STEP 파일을 읽는 중…</div></div></div>
+    <div id="tip"></div>
+    <div id="err"></div>
+  </div>
+
+  <aside>
+    <section>
+      <h3>전체 치수 (날개 포함)</h3>
+      <div class="dim">
+        <span class="k">가로 (X)</span><span class="v" id="dimX">–</span>
+        <span class="k">세로 (Y)</span><span class="v" id="dimY">–</span>
+        <span class="k">높이 (Z)</span><span class="v" id="dimZ">–</span>
+      </div>
+      <label class="chk"><input type="checkbox" id="chkDims" checked> 3D 화면에 치수선 표시</label>
+      <label class="chk"><input type="checkbox" id="chkGrid" checked> 그리드·축 표시</label>
+    </section>
+    <section>
+      <h3>단면 (바닥면 기준)</h3>
+      <div class="row">
+        <button id="btnPick" disabled>바닥면 클릭해 단면 위치 선택</button>
+      </div>
+      <p class="hint" id="secHint">파일을 먼저 여세요.</p>
+      <div id="sliderWrap" style="display:none">
+        <div class="hint">단면 위치 (길이 방향으로 이동)</div>
+        <input type="range" id="secSlider" min="0" max="1000" value="500">
+      </div>
+      <div class="row">
+        <button id="btnSecDims" disabled>치수 확인</button>
+        <button id="btnSecClear" disabled>단면 해제</button>
+      </div>
+      <div class="dim" style="margin-top:8px" id="secDimBox" hidden>
+        <span class="k">본체 폭</span><span class="v" id="secW">–</span>
+        <span class="k">본체 높이</span><span class="v" id="secH">–</span>
+      </div>
+      <canvas id="sec2d"></canvas>
+      <p class="hint" id="secNote" style="display:none">폭·높이는 롯드 본체만 잰 값입니다. 날개(연한 선)는 제외됩니다.</p>
+    </section>
+    <section>
+      <h3>조작</h3>
+      <p class="hint">왼쪽 드래그: 회전 · 휠: 확대/축소 · 오른쪽 드래그: 이동</p>
+    </section>
+  </aside>
+
+  <footer>
+    <span id="stTri">삼각형 –</span>
+    <span id="stFace">면 –</span>
+    <span>정밀도 0.01 mm</span>
+    <span>단위 mm</span>
+    <span id="stTime"></span>
+  </footer>
+</div>
+
+<script src="lib/occt-import-js.js"></script>
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from './lib/OrbitControls.js';
+
+const DEFLECTION = 0.01;      // mm, PRD 확정값
+const ANGULAR = 0.1;          // rad
+
+// ---------- 3D 기본 세팅 ----------
+const $ = id => document.getElementById(id);
+const viewport = $('viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.localClippingEnabled = true;
+viewport.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 5000);
+camera.up.set(0, 0, 1);              // CAD 관례: Z가 위
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.12;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x99a3b3, 2.2));
+const camLight = new THREE.DirectionalLight(0xffffff, 2.6); camera.add(camLight); camLight.position.set(0.6, 0.8, 1); scene.add(camera);
+const fill = new THREE.DirectionalLight(0xffffff, 1.0); fill.position.set(-1, 1, -0.5); scene.add(fill);
+
+const helpers = new THREE.Group(); scene.add(helpers);
+const dimGroup = new THREE.Group(); scene.add(dimGroup);
+const secGroup = new THREE.Group(); scene.add(secGroup);
+let modelGroup = null, modelBox = null, modelMesh = null, modelMat = null;
+let gridMesh = null, labelScale = 1;
+window.__dbg = { scene, camera, get section() { return section; }, get modelMat() { return modelMat; } };
+
+function resize() {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport); resize();
+
+(function loop() {
+  requestAnimationFrame(loop); controls.update();
+  if (gridMesh) gridMesh.visible = helpers.visible && camera.position.z > gridMesh.position.z; // 아래에서 볼 때 그리드가 모델을 가리지 않게
+  renderer.render(scene, camera);
+})();
+
+// ---------- 유틸 ----------
+const fmt = v => v.toFixed(2);
+function setText(id, t) { $(id).textContent = t; }
+function setDim(id, v) { const el = $(id); el.textContent = fmt(v); const sm = document.createElement('small'); sm.textContent = 'mm'; el.appendChild(sm); }
+function showErr(msg) { const e = $('err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
+function showTip(msg) { const e = $('tip'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
+function overlay(on, text) { const o = $('overlay'); o.style.display = on ? 'flex' : 'none'; if (text) setText('overlayText', text); }
+
+function makeLabel(text, color = '#1f2933') {
+  const c = document.createElement('canvas'); const ctx = c.getContext('2d');
+  const font = 'bold 40px "Malgun Gothic", "Segoe UI", sans-serif';
+  ctx.font = font; const w = Math.ceil(ctx.measureText(text).width) + 28;
+  c.width = w; c.height = 56; ctx.font = font;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fillRect(0, 0, w, 56);
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 2; ctx.strokeRect(1, 1, w - 2, 54);
+  ctx.fillStyle = color; ctx.textBaseline = 'middle'; ctx.fillText(text, 14, 30);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.scale.set(w / 56 * labelScale, labelScale, 1); sp.renderOrder = 10; return sp;
+}
+
+function dimensionLine(a, b, offset, text, color = 0x2f6fed) {
+  const g = new THREE.Group();
+  const a2 = a.clone().add(offset), b2 = b.clone().add(offset);
+  const mat = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true });
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, a2]), mat));
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([b, b2]), mat));
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a2, b2]), mat));
+  const dotGeo = new THREE.SphereGeometry(labelScale * 0.12, 8, 8); const dotMat = new THREE.MeshBasicMaterial({ color, depthTest: false });
+  for (const p of [a2, b2]) { const m = new THREE.Mesh(dotGeo, dotMat); m.position.copy(p); g.add(m); }
+  const lb = makeLabel(text); lb.position.copy(a2.clone().add(b2).multiplyScalar(0.5)); g.add(lb);
+  g.children.forEach(c => c.renderOrder = 9);
+  return g;
+}
+
+function buildDims(box) {
+  dimGroup.clear();
+  const min = box.min, max = box.max, s = new THREE.Vector3(); box.getSize(s);
+  const off = Math.max(s.x, s.y, s.z) * 0.12;
+  dimGroup.add(dimensionLine(new THREE.Vector3(min.x, min.y, min.z), new THREE.Vector3(max.x, min.y, min.z), new THREE.Vector3(0, -off, 0), `가로 ${fmt(s.x)} mm`));
+  dimGroup.add(dimensionLine(new THREE.Vector3(max.x, min.y, min.z), new THREE.Vector3(max.x, max.y, min.z), new THREE.Vector3(off, 0, 0), `세로 ${fmt(s.y)} mm`));
+  dimGroup.add(dimensionLine(new THREE.Vector3(max.x, min.y, min.z), new THREE.Vector3(max.x, min.y, max.z), new THREE.Vector3(off * 0.7, -off * 0.7, 0), `높이 ${fmt(s.z)} mm`));
+  dimGroup.visible = $('chkDims').checked;
+}
+
+function buildHelpers(box) {
+  helpers.clear();
+  const s = new THREE.Vector3(); box.getSize(s); const c = new THREE.Vector3(); box.getCenter(c);
+  const ext = Math.ceil(Math.max(s.x, s.y) * 1.6 / 10) * 10;
+  gridMesh = new THREE.GridHelper(ext, ext / 5, 0xb0b7c3, 0xd9dde3);
+  gridMesh.material.transparent = true; gridMesh.material.opacity = 0.6;
+  gridMesh.rotation.x = Math.PI / 2; gridMesh.position.set(c.x, c.y, box.min.z - 0.01);
+  helpers.add(gridMesh);
+  const axes = new THREE.AxesHelper(Math.max(s.x, s.y, s.z) * 0.5); axes.position.set(box.min.x, box.min.y, box.min.z); helpers.add(axes);
+  helpers.visible = $('chkGrid').checked;
+}
+
+// ---------- 카메라 ----------
+function fitView(dir) {
+  if (!modelBox) return;
+  const s = new THREE.Vector3(); modelBox.getSize(s); const c = new THREE.Vector3(); modelBox.getCenter(c);
+  const radius = s.length() / 2;
+  const dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15;
+  const d = (dir || camera.position.clone().sub(controls.target)).clone().normalize();
+  camera.position.copy(c).add(d.multiplyScalar(dist));
+  camera.up.set(0, 0, 1);
+  if (dir && Math.abs(d.z) > 0.99) camera.up.set(0, 1, 0); // 위·아래에서 볼 때: 화면 위쪽 = +Y (날개가 위로)
+  camera.near = dist / 100; camera.far = dist * 100; camera.updateProjectionMatrix();
+  controls.target.copy(c); controls.update();
+}
+const VIEWS = {
+  front: new THREE.Vector3(0, -1, 0), top: new THREE.Vector3(0, 0, 1), side: new THREE.Vector3(1, 0, 0),
+  bottom: new THREE.Vector3(0, 0, -1), iso: new THREE.Vector3(1, -1, 0.8),
+};
+document.querySelectorAll('button[data-view]').forEach(b => b.addEventListener('click', () => fitView(VIEWS[b.dataset.view])));
+$('btnFit').addEventListener('click', () => fitView());
+$('chkDims').addEventListener('change', e => dimGroup.visible = e.target.checked);
+$('chkGrid').addEventListener('change', e => helpers.visible = e.target.checked);
+
+// ---------- STEP 로딩 ----------
+let occt = null;
+async function getOcct() {
+  if (!occt) { overlay(true, '3D 엔진을 준비하는 중… (처음 한 번만, 약 8 MB)'); occt = await occtimportjs(); }
+  return occt;
+}
+const tick = () => new Promise(r => setTimeout(r, 30));
+
+async function loadStep(buffer, name) {
+  showErr(''); clearSection();
+  overlay(true, '3D 엔진을 준비하는 중…'); await tick();
+  try {
+    const o = await getOcct();
+    overlay(true, `STEP 파일을 읽는 중… (${name})`); await tick();
+    const t0 = performance.now();
+    const res = o.ReadStepFile(new Uint8Array(buffer), {
+      linearUnit: 'millimeter', linearDeflectionType: 'absolute_value',
+      linearDeflection: DEFLECTION, angularDeflection: ANGULAR,
+    });
+    if (!res.success || !res.meshes.length) throw new Error('STEP 파일을 읽지 못했습니다. 파일이 손상되었거나 지원하지 않는 형식입니다.');
+    const ms = Math.round(performance.now() - t0);
+    showModel(res, name, ms);
+  } catch (e) {
+    console.error(e); showErr(e.message || String(e));
+  } finally { overlay(false); }
+}
+
+// 여러 메시를 하나로 합침 (면 번호는 triFace 배열에 보관)
+let triFace = null, faceInfo = null, bottomFaces = null, lengthAxis = new THREE.Vector3(1, 0, 0);
+
+function showModel(res, name, ms) {
+  if (modelGroup) { scene.remove(modelGroup); modelGroup.traverse(o => { o.geometry?.dispose(); }); }
+  const pos = [], nor = [], idx = []; const faces = []; let base = 0, faceId = 0;
+  for (const m of res.meshes) {
+    const p = m.attributes.position.array, n = m.attributes.normal ? m.attributes.normal.array : null, ix = m.index.array;
+    for (let i = 0; i < p.length; i++) pos.push(p[i]);
+    if (n) for (let i = 0; i < n.length; i++) nor.push(n[i]);
+    for (let i = 0; i < ix.length; i++) idx.push(ix[i] + base);
+    const triBase = (idx.length - ix.length) / 3;
+    if (m.brep_faces) for (const f of m.brep_faces) faces.push({ id: faceId++, first: triBase + f.first, last: triBase + f.last });
+    base += p.length / 3;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(Float32Array.from(pos), 3));
+  if (nor.length === pos.length) g.setAttribute('normal', new THREE.Float32BufferAttribute(Float32Array.from(nor), 3)); else g.computeVertexNormals();
+  g.setIndex(new THREE.BufferAttribute(Uint32Array.from(idx), 1));
+  const triCount = idx.length / 3;
+  triFace = new Int32Array(triCount).fill(-1);
+  for (const f of faces) for (let t = f.first; t <= f.last; t++) triFace[t] = f.id;
+
+  modelMat = new THREE.MeshStandardMaterial({ color: 0xc4c2e6, metalness: 0.02, roughness: 0.5, side: THREE.DoubleSide, clipShadows: true });
+  modelMesh = new THREE.Mesh(g, modelMat);
+  modelGroup = new THREE.Group(); modelGroup.add(modelMesh); scene.add(modelGroup);
+  modelBox = new THREE.Box3().setFromObject(modelGroup);
+  const s = new THREE.Vector3(); modelBox.getSize(s);
+  labelScale = Math.max(s.x, s.y, s.z) * 0.05;
+  setDim('dimX', s.x); setDim('dimY', s.y); setDim('dimZ', s.z);
+  setText('stTri', `삼각형 ${triCount.toLocaleString()}개`);
+  setText('stFace', faces.length ? `면 ${faces.length}개` : '');
+  setText('stTime', `읽기 ${(ms / 1000).toFixed(1)}초`);
+  setText('fileName', name);
+  $('drop').style.display = 'none';
+  buildHelpers(modelBox); buildDims(modelBox);
+  // 길이 방향 = 가장 긴 축
+  lengthAxis = s.x >= s.y && s.x >= s.z ? new THREE.Vector3(1, 0, 0) : (s.y >= s.z ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1));
+  widthAxis = lengthAxis.x ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);   // 폭 방향 = 길이·높이(Z)에 수직
+  analyzeFaces(g, faces);
+  fitView(VIEWS.iso);
+  $('btnPick').disabled = false;
+  setText('secHint', `바닥면(아래를 향한 면)이 ${bottomFaces.size}개 감지됐습니다. 버튼을 누른 뒤 바닥면 위를 클릭하세요.`);
+}
+
+// 면별 면적·평균 법선 → 바닥면(아래를 향하는 큰 면) 판정
+function analyzeFaces(g, faces) {
+  const P = g.attributes.position.array, I = g.index.array;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
+  faceInfo = faces.map(f => {
+    let area = 0; const sum = new THREE.Vector3(); const cen = new THREE.Vector3();
+    for (let t = f.first; t <= f.last; t++) {
+      a.fromArray(P, I[t * 3] * 3); b.fromArray(P, I[t * 3 + 1] * 3); c.fromArray(P, I[t * 3 + 2] * 3);
+      n.subVectors(b, a).cross(c.clone().sub(a)); const ar = n.length() / 2;
+      area += ar; sum.add(n); cen.add(a).add(b).add(c);
+    }
+    return { id: f.id, first: f.first, last: f.last, area, normal: sum.normalize(), center: cen.divideScalar(3 * (f.last - f.first + 1)) };
+  });
+  const maxArea = Math.max(...faceInfo.map(f => f.area));
+  bottomFaces = new Set(faceInfo.filter(f => f.normal.z < -0.6 && f.area > maxArea * 0.03).map(f => f.id));
+  // 바닥면 삼각형 중심 목록 (슬라이더용)
+  bottomTris = [];
+  for (const f of faceInfo) if (bottomFaces.has(f.id)) for (let t = f.first; t <= f.last; t++) {
+    a.fromArray(P, I[t * 3] * 3); b.fromArray(P, I[t * 3 + 1] * 3); c.fromArray(P, I[t * 3 + 2] * 3);
+    n.subVectors(b, a).cross(c.clone().sub(a)).normalize(); if (n.z > 0) n.negate();
+    bottomTris.push({ t, c: a.clone().add(b).add(c).divideScalar(3), n: n.clone() });
+  }
+  // 슬라이더 범위: 바닥면의 길이 방향 범위
+  let lo = Infinity, hi = -Infinity; for (const bt of bottomTris) { const v = bt.c.dot(lengthAxis); lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  sliderRange = [lo, hi];
+}
+let bottomTris = [], sliderRange = [0, 1], widthAxis = new THREE.Vector3(0, 1, 0);
+
+// ---------- 단면 ----------
+let picking = false, section = null;   // section = { point, normal(n), t(길이방향), u(폭방향), plane, loops, body }
+const raycaster = new THREE.Raycaster();
+
+$('btnPick').addEventListener('click', () => { picking = !picking; $('btnPick').classList.toggle('active', picking); viewport.classList.toggle('pick', picking); showTip(picking ? '바닥면 위의 한 지점을 클릭하세요 (ESC: 취소)' : ''); });
+window.addEventListener('keydown', e => { if (e.key === 'Escape' && picking) $('btnPick').click(); });
+
+renderer.domElement.addEventListener('pointerdown', e => { if (picking) { e._down = [e.clientX, e.clientY]; renderer.domElement._down = [e.clientX, e.clientY]; } });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!picking || !modelMesh) return;
+  const d = renderer.domElement._down; if (d && Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 4) return; // 드래그는 무시
+  const r = renderer.domElement.getBoundingClientRect();
+  const m = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(m, camera);
+  const savedClip = modelMat.clippingPlanes; modelMat.clippingPlanes = null;
+  const hits = raycaster.intersectObject(modelMesh, false);
+  modelMat.clippingPlanes = savedClip;
+  const hit = hits.find(h => bottomFaces.has(triFace[h.faceIndex]));
+  if (!hit) { showTip('바닥면이 아닙니다. 아래를 향한 면(바닥면)을 클릭하세요. "바닥면" 시점 버튼을 쓰면 편합니다.'); return; }
+  $('btnPick').click();
+  makeSectionAt(hit.point, interpNormal(hit));
+});
+
+// 삼각형의 꼭짓점 법선을 무게중심 좌표로 보간 → 곡면 법선
+function interpNormal(hit) {
+  const g = modelMesh.geometry, I = g.index.array, N = g.attributes.normal.array, P = g.attributes.position.array;
+  const i0 = I[hit.faceIndex * 3], i1 = I[hit.faceIndex * 3 + 1], i2 = I[hit.faceIndex * 3 + 2];
+  const a = new THREE.Vector3().fromArray(P, i0 * 3), b = new THREE.Vector3().fromArray(P, i1 * 3), c = new THREE.Vector3().fromArray(P, i2 * 3);
+  const bc = new THREE.Vector3(); THREE.Triangle.getBarycoord(hit.point, a, b, c, bc);
+  const n = new THREE.Vector3().fromArray(N, i0 * 3).multiplyScalar(bc.x)
+    .add(new THREE.Vector3().fromArray(N, i1 * 3).multiplyScalar(bc.y))
+    .add(new THREE.Vector3().fromArray(N, i2 * 3).multiplyScalar(bc.z)).normalize();
+  if (n.z > 0) n.negate(); // 바닥면 법선은 아래를 향하도록
+  return n;
+}
+
+function makeSectionAt(point, nRaw) {
+  // 바닥면 법선에서 옆(폭 방향) 기울기 성분은 제거 → 단면은 항상 롯드를 가로지르는 방향이 되고, 아치를 따라 앞뒤로만 기울어짐
+  const n = nRaw.clone().sub(widthAxis.clone().multiplyScalar(nRaw.dot(widthAxis))).normalize();
+  // 단면 평면: 길이 방향을 바닥면 접평면에 투영한 t 를 법선으로 → 평면은 n(수직 방향)을 포함
+  const t = lengthAxis.clone().sub(n.clone().multiplyScalar(lengthAxis.dot(n))).normalize();
+  const u = new THREE.Vector3().crossVectors(n, t).normalize();      // 폭 방향
+  const v = n.clone().negate();                                       // 높이 방향(위)
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(t, point);
+  const loops = sliceMesh(plane);
+  section = { point: point.clone(), n: n.clone(), t, u, v, plane, loops };
+  measureBody(section);
+  drawSection(section);
+  // 슬라이더 위치 갱신
+  const val = (point.dot(lengthAxis) - sliderRange[0]) / (sliderRange[1] - sliderRange[0]);
+  $('secSlider').value = Math.round(THREE.MathUtils.clamp(val, 0, 1) * 1000);
+  $('sliderWrap').style.display = 'block';
+  $('btnSecDims').disabled = false; $('btnSecClear').disabled = false;
+  $('secDimBox').hidden = true; $('sec2d').style.display = 'none'; $('secNote').style.display = 'none';
+  setText('secHint', `단면 위치: X ${fmt(point.x)}, Y ${fmt(point.y)}, Z ${fmt(point.z)} · 바닥면 기울기 ${THREE.MathUtils.radToDeg(Math.acos(-n.z)).toFixed(1)}°`);
+  showTip('');
+  window.__section = { point: point.toArray(), n: n.toArray(), t: t.toArray(), u: u.toArray(), body: section.body, full: section.full };
+}
+
+// 슬라이더: 길이 방향 위치 → 그 위치의 바닥면 삼각형(가운데 쪽)에서 단면 생성
+$('secSlider').addEventListener('input', e => {
+  if (!bottomTris.length) return;
+  const x = sliderRange[0] + (e.target.value / 1000) * (sliderRange[1] - sliderRange[0]);
+  // 해당 길이 위치의 바닥면 삼각형들 중 폭 방향 중앙에 가까운 것
+  const cands = bottomTris.filter(bt => Math.abs(bt.c.dot(lengthAxis) - x) < 0.15);
+  if (!cands.length) return;
+  // 옆으로 기울지 않은(폭 방향 성분이 가장 작은) 바닥 삼각형 = 롯드 본체 바닥의 가운데
+  let best = cands[0], bd = Infinity; for (const c of cands) { const d = Math.abs(c.n.dot(widthAxis)); if (d < bd) { bd = d; best = c; } }
+  const hit = { faceIndex: best.t, point: best.c };
+  makeSectionAt(best.c, interpNormal(hit));
+});
+
+// 메시 ∩ 평면 → 선분 → 닫힌 루프
+function sliceMesh(plane) {
+  const g = modelMesh.geometry, P = g.attributes.position.array, I = g.index.array;
+  const segs = []; const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const tri = [a, b, c]; const d = [0, 0, 0];
+  for (let t = 0; t < I.length / 3; t++) {
+    a.fromArray(P, I[t * 3] * 3); b.fromArray(P, I[t * 3 + 1] * 3); c.fromArray(P, I[t * 3 + 2] * 3);
+    d[0] = plane.distanceToPoint(a); d[1] = plane.distanceToPoint(b); d[2] = plane.distanceToPoint(c);
+    if ((d[0] > 0 && d[1] > 0 && d[2] > 0) || (d[0] < 0 && d[1] < 0 && d[2] < 0)) continue;
+    const pts = [];
+    for (let i = 0; i < 3; i++) {
+      const j = (i + 1) % 3;
+      if ((d[i] > 0) !== (d[j] > 0)) { const s = d[i] / (d[i] - d[j]); pts.push(tri[i].clone().lerp(tri[j], s)); }
+    }
+    if (pts.length === 2) segs.push({ p: pts, face: triFace[t] });
+  }
+  // 선분 잇기 (끝점 해시)
+  const key = p => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)},${Math.round(p.z * 1000)}`;
+  const map = new Map(); segs.forEach((s, i) => { for (const p of s.p) { const k = key(p); if (!map.has(k)) map.set(k, []); map.get(k).push(i); } });
+  const used = new Uint8Array(segs.length); const loops = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue; used[i] = 1;
+    const pts = [segs[i].p[0], segs[i].p[1]]; const faces = [segs[i].face];
+    let cur = segs[i].p[1];
+    for (let guard = 0; guard < segs.length; guard++) {
+      const nb = (map.get(key(cur)) || []).find(j => !used[j]); if (nb === undefined) break;
+      used[nb] = 1; const s = segs[nb];
+      const next = key(s.p[0]) === key(cur) ? s.p[1] : s.p[0];
+      pts.push(next); faces.push(s.face); cur = next;
+      if (key(cur) === key(pts[0])) break;
+    }
+    loops.push({ pts, faces });
+  }
+  return loops;
+}
+
+// 본체 치수: 단면 두께 프로필로 본체(두꺼운 원통부)와 날개(얇은 판)를 구분
+// 1) 폭 방향(u)으로 0.05mm 간격 빈을 만들고 각 빈의 위아래 두께를 잰다
+// 2) 클릭 지점 근처의 최대 두께에서 양쪽으로 걸어가며, 두께가 절반 아래로 떨어진 뒤 더 이상 줄지 않으면(평평한 날개) 멈춘다
+// 3) 멈춘 위치를 가장 가까운 B-rep 면 경계 꼭짓점에 맞춘다
+function measureBody(sec) {
+  const { point, u, v, loops } = sec;
+  const to2 = p => { const q = p.clone().sub(point); return [q.dot(u), q.dot(v)]; };
+  const polys = loops.filter(L => L.pts.length >= 3).map(L => ({ pts: L.pts.map(to2), faces: L.faces }));
+  let U0 = Infinity, U1 = -Infinity, V0 = Infinity, V1 = -Infinity;
+  for (const P of polys) for (const [x, y] of P.pts) { U0 = Math.min(U0, x); U1 = Math.max(U1, x); V0 = Math.min(V0, y); V1 = Math.max(V1, y); }
+  sec.full = { w: U1 - U0, h: V1 - V0 };
+  const STEP = 0.05, nb = Math.max(2, Math.ceil((U1 - U0) / STEP) + 1);
+  const lo = new Float64Array(nb).fill(Infinity), hi = new Float64Array(nb).fill(-Infinity);
+  for (const P of polys) for (let i = 0; i + 1 < P.pts.length; i++) {
+    const [ax, ay] = P.pts[i], [bx, by] = P.pts[i + 1]; if (ax === bx) continue;
+    const i0 = Math.ceil((Math.min(ax, bx) - U0) / STEP), i1 = Math.floor((Math.max(ax, bx) - U0) / STEP);
+    for (let k = Math.max(0, i0); k <= Math.min(nb - 1, i1); k++) { const x = U0 + k * STEP; const y = ay + (by - ay) * (x - ax) / (bx - ax); lo[k] = Math.min(lo[k], y); hi[k] = Math.max(hi[k], y); }
+  }
+  const th = k => (hi[k] > lo[k] ? hi[k] - lo[k] : 0);
+  const seed = Math.round((0 - U0) / STEP);
+  let iMax = seed; for (let k = Math.max(0, seed - 60); k <= Math.min(nb - 1, seed + 60); k++) if (th(k) > th(iMax)) iMax = k;
+  const maxT = th(iMax);
+  const walk = dir => {
+    let i = iMax, prev = maxT, reachedEnd = false;
+    for (;;) {
+      const n = i + dir; if (n < 0 || n >= nb || th(n) <= 0) { reachedEnd = true; break; }
+      const t = th(n);
+      if (t < maxT * 0.5 && t > prev - 0.01) break;   // 얇아진 뒤 더 이상 안 줄어듦 → 날개 시작
+      prev = t; i = n;
+    }
+    return { u: U0 + i * STEP, reachedEnd };
+  };
+  const L = walk(-1), R = walk(+1);
+  // 면 경계 꼭짓점에 맞추기
+  const snap = (edge, dir) => {
+    if (edge.reachedEnd) return dir < 0 ? U0 : U1;
+    // 멈춘 위치에서 0.3mm 안에 있는 면 경계 중 가장 바깥쪽(날개 쪽) 것을 본체 끝으로 삼는다
+    let best = edge.u;
+    for (const P of polys) for (let i = 1; i < P.pts.length; i++) if (P.faces[Math.min(i, P.faces.length - 1)] !== P.faces[i - 1]) {
+      const x = P.pts[i][0]; if (Math.abs(x - edge.u) < 0.3 && (dir < 0 ? x < best : x > best)) best = x;
+    }
+    return best;
+  };
+  const w0 = snap(L, -1), w1 = snap(R, +1);
+  let h0 = Infinity, h1 = -Infinity; const segsB = [], segsW = [];
+  const inR = x => x >= w0 - 0.005 && x <= w1 + 0.005;
+  for (const P of polys) for (let i = 0; i + 1 < P.pts.length; i++) {
+    const p = P.pts[i], q = P.pts[i + 1];
+    if (inR(p[0]) && inR(q[0])) { segsB.push([p, q]); for (const r of [p, q]) { h0 = Math.min(h0, r[1]); h1 = Math.max(h1, r[1]); } }
+    else segsW.push([p, q]);
+  }
+  sec.body = { w: w1 - w0, h: h1 - h0, w0, w1, h0, h1, segs: segsB, maxThickness: maxT };
+  sec.wing = { segs: segsW };
+}
+
+function drawSection(sec) {
+  secGroup.clear();
+  modelMat.clippingPlanes = [sec.plane.clone().negate()];   // t 방향 앞쪽을 잘라냄 (평면 뒤쪽만 남김)
+  modelMat.needsUpdate = true;
+  // 반투명 평면: 단면 윤곽 범위보다 조금 크게
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [p, q] of [...sec.body.segs, ...sec.wing.segs]) for (const r of [p, q]) { x0 = Math.min(x0, r[0]); x1 = Math.max(x1, r[0]); y0 = Math.min(y0, r[1]); y1 = Math.max(y1, r[1]); }
+  const padP = labelScale * 1.5;
+  const pg = new THREE.PlaneGeometry((x1 - x0) + padP * 2, (y1 - y0) + padP * 2); const pm = new THREE.MeshBasicMaterial({ color: 0x2f6fed, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false });
+  const pmesh = new THREE.Mesh(pg, pm);
+  const basis = new THREE.Matrix4().makeBasis(sec.u, sec.v, sec.t); pmesh.setRotationFromMatrix(basis);
+  pmesh.position.copy(sec.point).add(sec.u.clone().multiplyScalar((x0 + x1) / 2)).add(sec.v.clone().multiplyScalar((y0 + y1) / 2));
+  secGroup.add(pmesh);
+  // 윤곽선: 본체 진하게, 날개 연하게
+  const to3 = ([x, y]) => sec.point.clone().add(sec.u.clone().multiplyScalar(x)).add(sec.v.clone().multiplyScalar(y));
+  const addSegs = (segs, color, width) => {
+    if (!segs.length) return;
+    const pts = []; for (const [p, q] of segs) { pts.push(to3(p), to3(q)); }
+    const lg = new THREE.BufferGeometry().setFromPoints(pts);
+    const ln = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: width })); ln.renderOrder = 8; secGroup.add(ln);
+  };
+  addSegs(sec.body.segs, 0xe8590c, 1.0); addSegs(sec.wing.segs, 0xe8590c, 0.35);
+  // 클릭 지점 + 법선 표시
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(labelScale * 0.15, 12, 12), new THREE.MeshBasicMaterial({ color: 0xe8590c, depthTest: false })); dot.position.copy(sec.point); dot.renderOrder = 9; secGroup.add(dot);
+  secGroup.add(new THREE.ArrowHelper(sec.n, sec.point, labelScale * 1.5, 0xe8590c, labelScale * 0.4, labelScale * 0.25));
+}
+
+function drawSectionDims(sec) {
+  // 3D 치수선
+  const b = sec.body; const to3 = (x, y) => sec.point.clone().add(sec.u.clone().multiplyScalar(x)).add(sec.v.clone().multiplyScalar(y));
+  const off = labelScale * 1.2;
+  const old = secGroup.getObjectByName('secDims'); if (old) secGroup.remove(old);
+  const g = new THREE.Group(); g.name = 'secDims';
+  g.add(dimensionLine(to3(b.w0, b.h0), to3(b.w1, b.h0), sec.v.clone().multiplyScalar(-off), `폭 ${fmt(b.w)} mm`, 0xe8590c));
+  g.add(dimensionLine(to3(b.w1, b.h0), to3(b.w1, b.h1), sec.u.clone().multiplyScalar(off), `높이 ${fmt(b.h)} mm`, 0xe8590c));
+  secGroup.add(g);
+  // 2D 단면 그림
+  const cv = $('sec2d'); cv.style.display = 'block'; const W = cv.clientWidth, H = cv.clientHeight; cv.width = W * 2; cv.height = H * 2;
+  const ctx = cv.getContext('2d'); ctx.scale(2, 2); ctx.clearRect(0, 0, W, H);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [p, q] of [...b.segs, ...sec.wing.segs]) for (const r of [p, q]) { x0 = Math.min(x0, r[0]); x1 = Math.max(x1, r[0]); y0 = Math.min(y0, r[1]); y1 = Math.max(y1, r[1]); }
+  const pad = 26; const sc = Math.min((W - pad * 2) / (x1 - x0), (H - pad * 2) / (y1 - y0));
+  const X = x => pad + (x - x0) * sc + ((W - pad * 2) - (x1 - x0) * sc) / 2, Y = y => H - pad - (y - y0) * sc - ((H - pad * 2) - (y1 - y0) * sc) / 2;
+  const draw = (segs, color, lw) => { ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath(); for (const [p, q] of segs) { ctx.moveTo(X(p[0]), Y(p[1])); ctx.lineTo(X(q[0]), Y(q[1])); } ctx.stroke(); };
+  draw(sec.wing.segs, '#c9ccd3', 1); draw(b.segs, '#e8590c', 1.8);
+  ctx.strokeStyle = '#2f6fed'; ctx.fillStyle = '#2f6fed'; ctx.lineWidth = 1; ctx.font = '11px "Malgun Gothic", sans-serif';
+  const yb = Y(b.h0) + 14; ctx.beginPath(); ctx.moveTo(X(b.w0), yb); ctx.lineTo(X(b.w1), yb); ctx.stroke(); ctx.textAlign = 'center'; ctx.fillText(`${fmt(b.w)} mm`, (X(b.w0) + X(b.w1)) / 2, yb + 12);
+  const xr = X(b.w1) + 10; ctx.beginPath(); ctx.moveTo(xr, Y(b.h0)); ctx.lineTo(xr, Y(b.h1)); ctx.stroke(); ctx.save(); ctx.translate(xr + 10, (Y(b.h0) + Y(b.h1)) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(`${fmt(b.h)} mm`, 0, 0); ctx.restore();
+}
+
+$('btnSecDims').addEventListener('click', () => {
+  if (!section) return;
+  setDim('secW', section.body.w); setDim('secH', section.body.h);
+  $('secDimBox').hidden = false; $('secNote').style.display = 'block';
+  drawSectionDims(section);
+});
+$('btnSecClear').addEventListener('click', clearSection);
+function clearSection() {
+  section = null; secGroup.clear();
+  if (modelMat) { modelMat.clippingPlanes = null; modelMat.needsUpdate = true; }
+  $('btnSecDims').disabled = true; $('btnSecClear').disabled = true; $('secDimBox').hidden = true; $('sec2d').style.display = 'none'; $('secNote').style.display = 'none'; $('sliderWrap').style.display = 'none';
+  setText('secW', '–'); setText('secH', '–');
+  if (modelMesh) setText('secHint', '버튼을 누른 뒤 바닥면 위를 클릭하세요.');
+}
+
+// ---------- 파일 입력 ----------
+function isStep(name) { return /\.(stp|step)$/i.test(name); }
+async function handleFile(file) {
+  if (!isStep(file.name)) { showErr(`STEP 파일(.stp / .step)만 열 수 있습니다: ${file.name}`); return; }
+  loadStep(await file.arrayBuffer(), file.name);
+}
+$('btnOpen').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
+['dragenter', 'dragover'].forEach(ev => viewport.addEventListener(ev, e => { e.preventDefault(); viewport.classList.add('dragover'); }));
+['dragleave', 'drop'].forEach(ev => viewport.addEventListener(ev, e => { e.preventDefault(); viewport.classList.remove('dragover'); }));
+viewport.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) handleFile(f); });
+
+// ?file=경로 → 같은 서버에 있는 STEP을 바로 열기 (테스트·데모용)
+const qs = new URLSearchParams(location.search);
+if (qs.get('file')) {
+  const url = qs.get('file');
+  fetch(url).then(r => { if (!r.ok) throw new Error(`파일을 가져오지 못했습니다: ${url}`); return r.arrayBuffer(); })
+    .then(b => loadStep(b, decodeURIComponent(url.split('/').pop()))).catch(e => showErr(e.message));
+}
+</script>
+</body>
+</html>
